@@ -1,0 +1,31 @@
+<?xml version="1.0"?>
+<launch>
+
+  <param name="robot_description" command="$(find xacro)/xacro.py '$(find bulldog_description)/urdf/bulldog_robot.xacro'" />
+
+  <node pkg="bulldog_driver" type="bulldog_node" name="bulldog_driver">
+    <param name="controller_port" value="/dev/motor_port" />
+    <param name="display_port" value="/dev/display_port" />
+    <!--减速比-->
+    <param name="ratio" value="32" />
+    <!-- 编码器线束 -->
+    <param name="encoder" value="2500" />
+  </node>
+
+  <rosparam command="load" file="$(find bulldog_driver)/config/control.yaml" />
+  <node name="controller_spawner" pkg="controller_manager" type="spawner" args="bulldog_joint_publisher bulldog_velocity_controller --shutdown-timeout 1" output="screen" />
+
+  <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+  <!--node pkg="robot_localization" type="ekf_localization_node" name="ekf_localization">
+    <rosparam command="load" file="$(find bulldog_driver)/config/localization.yaml" />
+  </node-->
+
+  <node pkg="diagnostic_aggregator" type="aggregator_node" name="diagnostic_aggregator">
+    <rosparam command="load" file="$(find bulldog_driver)/config/diagnostics.yaml"/>
+  </node>
+
+  <include file="$(find bulldog_driver)/launch/teleop.launch" />
+  <include file="$(find battery)/launch/battery.launch" />
+  <!--include file="$(find openzen_sensor)/launch/openzen_be1.launch" /-->
+</launch>
