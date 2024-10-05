@@ -15,10 +15,7 @@ class Driver(object):
         print(">> Start to open CAN Device")
         open_and_init_device1()
         rospy.sleep(1)
-        print(">> Start device1 successful")
-
-        enable_motor(0x01)
-        print(">> Enable device1 CAN1 motor successful")
+        print(">> Start device1 successful, CAN1 ready to receive data")
         
         rospy.sleep(2)
         self.timer1 = rospy.Timer(rospy.Duration(0.05), self.control_loop)
@@ -28,21 +25,46 @@ class Driver(object):
         self.vel_cmd = msg
         
     def control_loop(self, event):
-        set_motor_going(0x01, 100)
+        set_motor_going(1, 0.1)
         # if self.vel_cmd != None:
         #     if abs(self.vel_cmd.linear.x) == 0:
         #         vel = 0
         #     else:
         #         vel = self.vel_cmd.linear.x
-        #     set_motor_going(0x201, vel)
-        #     self.vel_cmd = None
+        #     set_motor_going(1, vel)
+        self.vel_cmd = None
+
+    def control_loop_test(self, event):
+        if self.vel_cmd is not None:
+            L = 0.5 # 履带间距0.5米
+            v_max = 1.0
+            v_threshold = 0.05
+
+            V = self.vel_cmd.linear.x
+            W = self.vel_cmd.angular.z
+
+            if abs(V) < v_threshold:
+                speed_L = - W * L / 2
+                speed_R = W * L / 2
+            else:
+                speed_L = V - W * L / 2
+                speed_R = V + W * L / 2
+
+            max_speed = max(abs(speed_L), abs(speed_R))
+            if max_speed > v_max:
+                scale = v_max / max_speed
+                speed_L *= scale
+                speed_R *= scale
+
+            set_motor_going(1, speed_L)
+            set_motor_going(2, -speed_R)
+
+            self.vel_cmd = None
+
         
     def __del__(self):
         close_device(0)
         rospy.loginfo("Device1 closed")
-
-
-
 
 
 
@@ -61,7 +83,13 @@ def set_motor_going(node_id, speed):
     
     data = (c_ubyte * 8)(0x0F, 0x00, 0x03, pulses16arr[0], pulses16arr[1], pulses16arr[2], pulses16arr[3])
     print("Set motor going: ", ' '.join(f'{byte:02X}' for byte in data))
-    transmit_data(0, 0, node_id, data)
+
+    if node_id == 1:
+        transmit_data(0, 0, 0x201, data)
+    elif node_id == 2:
+        transmit_data(0, 1, 0x201, data)
+    else:
+        return
 
 def open_and_init_device1():
     device_opened = open_device(0, 0)
@@ -75,9 +103,9 @@ def enable_motor(node_id):
     data = (c_ubyte * 8)(0x01, 0x06, 0x03, 0x03, 0x00, 0x01, 0x00, 0x00)
     # data = (c_ubyte * 8)(0x01, 0x06, 0x02, 0x00, 0x00, 0x01, 0x00, 0x00)
     # data = (c_ubyte * 8)(0x01, 0x03, 0x0B, 0x00, 0x00, 0x01, 0x00, 0x00)
-    crc_low, crc_high = calculate_crc(data[:6])  # CRC 计算只需要前六个字节
-    data[6] = crc_low
-    data[7] = crc_high
+    # crc_low, crc_high = calculate_crc(data[:6])  # CRC 计算只需要前六个字节
+    # data[6] = crc_low
+    # data[7] = crc_high
 
     print("Enable motor: ", ' '.join(f'{byte:02X}' for byte in data))
 
