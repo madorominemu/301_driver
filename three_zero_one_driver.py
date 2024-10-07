@@ -12,12 +12,17 @@ class Driver(object):
         rospy.Subscriber("/cmd_vel_out", Twist, self.vel_cb)
         
         self.vel_cmd = None
-
         self.shdj_L_info = None
         
         open_and_init_device1()
         rospy.sleep(1)
         print(">> Start device1 successful, ready to receive data")
+        
+        open_and_init_device2()
+        rospy.sleep(1)
+        print(">> Start device2 successful, ready to receive data")
+        
+        
         
         rospy.sleep(2)
         # self.timer1 = rospy.Timer(rospy.Duration(0.05), self.control_loop_test)
@@ -33,8 +38,9 @@ class Driver(object):
         self.vel_cmd = msg
         
     def control_loop_test(self, event):
-        set_motor_going(1, 0.02)
-        set_motor_going(2, 0.02)
+        # set_motor_going(1, 0.02)
+        # set_motor_going(2, 0.02)
+        set_swing_arm_going(1, 0.05)
 
     def control_loop(self, event):
         if self.vel_cmd is not None:
@@ -44,7 +50,7 @@ class Driver(object):
 
             V = self.vel_cmd.linear.x
             W = self.vel_cmd.angular.z
-            swing_arm_speed = self.vel_cmd.linear.z
+            swing_arm_speed = self.vel_cmd.angular.y
 
             if abs(V) < v_threshold:
                 speed_L = - W * L / 2
@@ -64,7 +70,7 @@ class Driver(object):
 
             print("speed_Left: ", speed_L, " | speed_right: ", speed_R)
             
-            # set_swing_arm_going(0x201, swing_arm_speed)
+            set_swing_arm_going(0, swing_arm_speed)
 
             self.vel_cmd = None
 
@@ -80,7 +86,7 @@ class Driver(object):
                     if can_id == "0x181":
                         # with self.rpm_FL_lock:
                         print(data)
-                        if data[0] == 0x1b or data[0] == 0x12:
+                        if data[0] == 0x37:
                             self.shdj_L_info = data
 
     def shutdown(self):
@@ -93,28 +99,34 @@ class Driver(object):
 ########################################################################
         
 # 输入speed单位：m/s
-def set_motor_going(node_id, speed):
-    rpm = speed_to_rpm(speed, 0.15, 20)
-    pulses = rpm_to_pulses_per_second(rpm)
-    pulses16arr = value_10_to_16(pulses)
+def set_motor_going(can_id, speed):
+    puls = speed_to_pulses_16arr(speed, 0.3, 20, 1000)
     
-    data = (c_ubyte*8)(0x0F, 0x00, 0x03, pulses16arr[0], pulses16arr[1], pulses16arr[2], pulses16arr[3], 0x00)
+    data = (c_ubyte*8)(0x0F, 0x00, 0x03, puls[0], puls[1], puls[2], puls[3], 0x00)
 
-    if node_id == 1:
+    if can_id == 1:
         transmit_data(0, 0, 0x201, data)
         # print("Set motor1 going: ", ' '.join(f'{byte:02X}' for byte in data))
-    elif node_id == 2:
+    elif can_id == 2:
         transmit_data(0, 1, 0x201, data)
         # print("Set motor2 going: ", ' '.join(f'{byte:02X}' for byte in data))
     else:
         return
     
-def set_swing_arm_going(node_id, speed):
-    rpm = speed_to_rpm(speed, 0.02, 70)
-    rpm16arr = value_10_to_16(rpm)
+def set_swing_arm_going(can_id, speed):
+    puls = speed_to_pulses_16arr(speed, 0.04, 70, 10000)
     
-    data = (c_ubyte * 8)(0x23, 0xFF, 0x60, 0x00, rpm16arr[0], rpm16arr[1], rpm16arr[2], rpm16arr[3])
-    res = transmit_data(1, 0, node_id, data)
+    data = (c_ubyte * 8)(0x23, 0xFF, 0x60, 0x00, puls[0], puls[1], puls[2], puls[3])
+
+    if can_id == 1:
+        transmit_data(1, 0, 0x201, data)
+        res = transmit_data(1, can_id, 0x201, data)
+        # print("Set motor1 going: ", ' '.join(f'{byte:02X}' for byte in data))
+    elif can_id == 2:
+        return # 预留给控制上部分人体电机
+        transmit_data(1, 1, 0x201, data)
+    else:
+        return
     
 def open_and_init_device1():
     device_opened = open_device(0, 0)
@@ -135,13 +147,12 @@ def open_and_init_device1():
 def open_and_init_device2():
     device_opened = open_device(1, 0)
     rospy.sleep(0.1)
-    can_initialized = init_can(1, 0, vci_initconfig1)
+    can_initialized = init_can(1, 0, vci_initconfig2)
     rospy.sleep(0.1)
     can_started = start_can(1, 0)
     rospy.sleep(0.1)
     
-    enable_kinco_motor(0x201)
-    rospy.sleep(0.1)
+    enable_kinco_motor(0)
 
 def enable_shdj_motor(can_id):
     # 控制字顺序依次写入 00h→06h→07h→0Fh→1F 电机启动运行
@@ -157,16 +168,53 @@ def enable_shdj_motor(can_id):
     res3 = transmit_data(0, can_id, 0x201, data3)
     rospy.sleep(1)
 
-def enable_kinco_motor(node_id):
-    # 设置位速度模式
+def enable_kinco_motor(can_id):
+    # 开启PDO传输
+    pdo = (c_ubyte*8)(0x01, 0x01, 0, 0, 0, 0, 0, 0)
+    res_pdo = transmit_data(1, can_id, 0x000, pdo)
+    
+    
+    # 150RPM成功案例
+    init_data = (c_ubyte*8)(0x0F, 0x00, 0x03, 0x00, 0x40, 0x06, 0x00, 0x00)
+    init_data = (c_ubyte*8)(0x0F, 0x00, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00)
+    res1 = transmit_data(1, can_id, 0x201, init_data)
+    
+    # 设置为速度模式
     set_mode = (c_ubyte*8)(0x2F, 0x60, 0x60, 0x00, 0x03, 0x00, 0x00, 0x00)
-    res1 = transmit_data(1, 0, node_id, set_mode)
+    res1 = transmit_data(1, can_id, 0x201, set_mode)
     # 松轴
-    lose_axle = (c_ubyte*8)(0x2B, 0x40, 0x60, 0x00, 0x06, 0x00, 0x00, 0x00)
-    res2 = transmit_data(1, 0, node_id, lose_axle)
+    # lose_axle = (c_ubyte*8)(0x2B, 0x40, 0x60, 0x00, 0x06, 0x00, 0x00, 0x00)
+    # res2 = transmit_data(1, can_id, 0x201, lose_axle)
 
 
 
+# 计算类函数 ############################################################
+########################################################################
+########################################################################
+
+def speed_to_pulses_16arr(speed, wheel_diameter, reduction_ratio, pulses_per_revolution):
+    pulses = speed_to_pulese(speed, wheel_diameter, reduction_ratio, pulses_per_revolution)
+    pulses16arr = value_10_to_16(pulses)
+    # print(pulses)
+    # print(' '.join(f'{byte:02X}' for byte in pulses16arr))
+    return pulses16arr
+
+def pulses_16arr_to_speed(pulses_16arr, wheel_diameter, reduction_ratio, pulses_per_revolution):
+    pulses = value_16_to_10(pulses_16arr)
+    speed = pulses_to_speed(pulses, wheel_diameter, reduction_ratio, pulses_per_revolution)
+    return speed
+
+# 输入: 速度 轮直径 减速比 转一圈所需脉冲数
+def speed_to_pulese(speed, wheel_diameter, reduction_ratio, pulses_per_revolution):
+    rpm = speed_to_rpm(speed, wheel_diameter, reduction_ratio)
+    pulses = rpm_to_pulses_per_second(rpm, pulses_per_revolution)
+    return int(pulses)
+
+# 输入: 脉冲数 轮直径 减速比 转一圈所需脉冲数
+def pulses_to_speed(pulses_per_second, wheel_diameter, reduction_ratio, pulses_per_revolution):
+    rpm = pulses_per_second_to_rpm(pulses_per_second, pulses_per_revolution)
+    speed = rpm_to_speed(rpm, wheel_diameter, reduction_ratio)
+    return speed
 
 def speed_to_rpm(speed, wheel_diameter, reduction_ratio):
     wheel_circumference = pi * wheel_diameter
@@ -174,12 +222,18 @@ def speed_to_rpm(speed, wheel_diameter, reduction_ratio):
     rpm = wheel_rotations_per_second * 60 * reduction_ratio
     return int(rpm)
 
-def rpm_to_pulses_per_second(rpm, pulses_per_revolution=1000):
+def rpm_to_speed(rpm, wheel_diameter, reduction_ratio):
+    wheel_circumference = pi * wheel_diameter
+    wheel_rotations_per_second = rpm / 60 / reduction_ratio
+    speed = wheel_rotations_per_second * wheel_circumference
+    return speed
+
+def rpm_to_pulses_per_second(rpm, pulses_per_revolution):
     rps = rpm / 60
     pulses_per_second = rps * pulses_per_revolution
     return int(pulses_per_second)
 
-def pulses_per_second_to_rpm(pulses_per_second, pulses_per_revolution=1000):
+def pulses_per_second_to_rpm(pulses_per_second, pulses_per_revolution):
     rps = pulses_per_second / pulses_per_revolution
     rpm = rps * 60
     return int(rpm)
@@ -196,7 +250,12 @@ def value_10_to_16(val):
     res = [byte1, byte2, byte3, byte4]
     return res
 
-
+# [E8, 03, 00, 00] to 1000
+def value_16_to_10(val):
+    res = (val[3] << 24) + (val[2] << 16) + (val[1] << 8) + (val[0] & 0xff)
+    if res > 0x7FFFFFFF:
+        res -= 0x100000000
+    return res
 
 
 
