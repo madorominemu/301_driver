@@ -80,6 +80,7 @@ class GasDetector(object):
 
         if self.ser.in_waiting:
             response = self.ser.read(self.ser.in_waiting)
+            response = bytearray(response)
             # print("Received response: " + ' '.join(format(x, '02X') for x in response))
             return response
         else:
