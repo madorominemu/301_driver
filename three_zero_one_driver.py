@@ -11,32 +11,34 @@ class Driver(object):
         rospy.init_node("driver")
         rospy.Subscriber("/cmd_vel_out", Twist, self.vel_cb)
         
-        self.kinco_can_device_id = 1
-        self.kinco_swing_arm_can_id = 1        
-        
-        self.shdj_can_device_id = 0
+        self.shdj_can_device_id = -1
         self.shdj_left_motor_can_id = 0
         self.shdj_right_motor_can_id = 1
+        
+        self.kinco_can_device_id = -1
+        self.kinco_swing_arm_can_id = 1 
         
         self.vel_cmd = None
         
         self.shdj_L_info = None
         self.shdj_R_info = None
         self.swing_arm_info = None
+
+        self.set_device_id_by_device_serial_num()
+        print("shdj_can_device_id: ", self.shdj_can_device_id, " |  kinco_can_device_id: ", self.kinco_can_device_id)
+        rospy.sleep(1)
         
-        
-        
-        
+
         open_and_init_device(self.shdj_can_device_id)
         rospy.sleep(1)
         open_and_init_device(self.kinco_can_device_id)
         rospy.sleep(1)
         
         
-        # enable_shdj_motor(self.shdj_can_device_id, self.shdj_left_motor_can_id)
-        # enable_shdj_motor(self.shdj_can_device_id, self.shdj_right_motor_can_id)
-        # rospy.sleep(1)
-        # print(">> Start shdj successful, ready to receive data")
+        enable_shdj_motor(self.shdj_can_device_id, self.shdj_left_motor_can_id)
+        enable_shdj_motor(self.shdj_can_device_id, self.shdj_right_motor_can_id)
+        rospy.sleep(1)
+        print(">> Start shdj successful, ready to receive data")
 
         
         enable_kinco_motor(self.kinco_can_device_id, self.kinco_swing_arm_can_id)
@@ -115,7 +117,7 @@ class Driver(object):
                     cob_id = hex(rx_vci_can_obj.STRUCT_ARRAY[i].ID)
                     if cob_id == "0x181":
                         # with self.shdj_L_info_lock:
-                        print(data)
+                        # print(data)
                         if data[0] == 0x37:
                             self.shdj_L_info = data
                             
@@ -130,7 +132,7 @@ class Driver(object):
                     cob_id = hex(rx_vci_can_obj.STRUCT_ARRAY[i].ID)
                     if cob_id == "0x181":
                         # with self.shdj_R_info_lock:
-                        print(data)
+                        # print(data)
                         if data[0] == 0x37:
                             self.shdj_R_info = data
                             
@@ -145,9 +147,25 @@ class Driver(object):
                     cob_id = hex(rx_vci_can_obj.STRUCT_ARRAY[i].ID)
                     if cob_id == "0x181":
                         # with self.shdj_R_info_lock:
-                        print(data)
+                        # print(data)
                         if data[0] == 0x37:
                             self.swing_arm_info = data
+
+    def set_device_id_by_device_serial_num(self):
+        serial_numbers = find_devices()
+        if len(serial_numbers) != 2:
+            return 
+        elif len(serial_numbers) == 2:
+            for i in range(len(serial_numbers)):
+                # print(i, serial_numbers[i])
+                if serial_numbers[i] == "31F100022FC":
+                    self.shdj_can_device_id = i
+                elif serial_numbers[i] == "31F10002282":
+                    self.kinco_can_device_id = i
+                else:
+                    return
+        else:
+            return
 
     def shutdown(self):
         set_motor_going(self.shdj_can_device_id, self.shdj_left_motor_can_id, 0)
